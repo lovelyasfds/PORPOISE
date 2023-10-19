@@ -16,6 +16,7 @@ from utils.utils import generate_split, nth
 
 
 
+# 划分数据集，保存到一个文件夹中
 def save_splits(split_datasets, column_keys, filename, boolean_style=False):
 	splits = [split_datasets[i].slide_data['slide_id'] for i in range(len(split_datasets))]
 	if not boolean_style:
@@ -33,7 +34,7 @@ def save_splits(split_datasets, column_keys, filename, boolean_style=False):
 
 class Generic_WSI_Classification_Dataset(Dataset):
 	def __init__(self,
-		csv_path = 'dataset_csv/ccrcc_clean.csv',
+		csv_path='dataset_csv/tcga_blca1_all_clean.csv.zip',
 		shuffle = False, 
 		seed = 7, 
 		print_info = True,

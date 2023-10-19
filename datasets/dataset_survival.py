@@ -19,7 +19,7 @@ from utils.utils import generate_split, nth
 
 class Generic_WSI_Survival_Dataset(Dataset):
     def __init__(self,
-        csv_path = 'dataset_csv/ccrcc_clean.csv', mode = 'omic', apply_sig = False,
+        csv_path = 'dataset_csv/tcga_blca1_all_clean.csv.zip', mode = 'omic', apply_sig = False,
         shuffle = False, seed = 7, print_info = True, n_bins = 4, ignore=[],
         patient_strat=False, label_col = None, filter_dict = {}, eps=1e-6):
         r"""
@@ -27,51 +27,66 @@ class Generic_WSI_Survival_Dataset(Dataset):
 
         Args:
             csv_file (string): Path to the csv file with annotations.
-            shuffle (boolean): Whether to shuffle
+            shuffle (boolean): Whether to shuffle 是否对数据随机打乱
             seed (int): random seed for shuffling the data
             print_info (boolean): Whether to print a summary of the dataset
-            label_dict (dict): Dictionary with key, value pairs for converting str labels to int
+            label_dict (dict): Dictionary with key, value pairs for converting str labels to int 用于将字符串标签转换为整数标签的键值对
             ignore (list): List containing class labels to ignore
         """
+        # 表示在初始化时还没有自定义的测试集标识
         self.custom_test_ids = None
         self.seed = seed
         self.print_info = print_info
+        # 控制是否进行基于患者的分层采样
         self.patient_strat = patient_strat
         self.train_ids, self.val_ids, self.test_ids  = (None, None, None)
         self.data_dir = None
 
+        # 读取 CSV 将其存储为 DataFrame
+        slide_data = pd.read_csv(csv_path, low_memory=False)
+        # 删除CSV文件中第一列
+        #slide_data = slide_data.drop(['Unnamed: 0'], axis=1)
+
+        # 如果shuffle参数为True，则对slide_data进行随机打乱操作
         if shuffle:
             np.random.seed(seed)
             np.random.shuffle(slide_data)
 
-        slide_data = pd.read_csv(csv_path, low_memory=False)
-        #slide_data = slide_data.drop(['Unnamed: 0'], axis=1)
+        # 如果 DataFrame 中不存在名为 'case_id' 的列，就根据索引创建一个 'case_id' 列，并重置 DataFrame 的索引
         if 'case_id' not in slide_data:
             slide_data.index = slide_data.index.str[:12]
             slide_data['case_id'] = slide_data.index
             slide_data = slide_data.reset_index(drop=True)
 
+        # 如果没有指定标签列，则默认使用生存时间作为标签列。如果指定了标签列，会检查它是否存在于 DataFrame 的列中，并将其设置为类的实例属性
         if not label_col:
             label_col = 'survival_months'
         else:
             assert label_col in slide_data.columns
         self.label_col = label_col
 
+        # 如果 'oncotree_code' 包含值 "IDC"，则只保留这个类别的数据行
         if "IDC" in slide_data['oncotree_code']: # must be BRCA (and if so, use only IDCs)
             slide_data = slide_data[slide_data['oncotree_code'] == 'IDC']
 
+        # 去除重复的病人信息，筛选出未删失的病人
         patients_df = slide_data.drop_duplicates(['case_id']).copy()
         uncensored_df = patients_df[patients_df['censorship'] < 1]
 
+        # 将数值型标签列进行分位数划分，并计算分位数的边界
         disc_labels, q_bins = pd.qcut(uncensored_df[label_col], q=n_bins, retbins=True, labels=False)
         q_bins[-1] = slide_data[label_col].max() + eps
         q_bins[0] = slide_data[label_col].min() - eps
-        
+
+        # 这段代码的作用是将病人的数值型标签列按照之前计算的分位数边界进行划分，并将划分结果作为离散标签插入到病人信息 DataFrame 中
         disc_labels, q_bins = pd.cut(patients_df[label_col], bins=q_bins, retbins=True, labels=False, right=False, include_lowest=True)
         patients_df.insert(2, 'label', disc_labels.values.astype(int))
 
+        # 创建一个病人信息字典，并将 slide_data 的索引列由生存时间改为 case_id
         patient_dict = {}
         slide_data = slide_data.set_index('case_id')
+
+        # 把每个 slide_ids 都添加到 patient_dict 中
         for patient in patients_df['case_id']:
             slide_ids = slide_data.loc[patient, 'slide_id']
             if isinstance(slide_ids, str):
@@ -81,11 +96,13 @@ class Generic_WSI_Survival_Dataset(Dataset):
             patient_dict.update({patient:slide_ids})
 
         self.patient_dict = patient_dict
-    
+
+        # 将处理后的数据定义为 slide_data ，删除原来索引，把 case_id 列的数据复制到 slide_id 列上
         slide_data = patients_df
         slide_data.reset_index(drop=True, inplace=True)
         slide_data = slide_data.assign(slide_id=slide_data['case_id'])
 
+        # 对每一个分组的label和是否审查进行一个特定数字的编码，比如label0和未审查0对应0，label0和未审查0对应1.(0,0):0,(0,1):1.
         label_dict = {}
         key_count = 0
         for i in range(len(q_bins)-1):
@@ -94,6 +111,7 @@ class Generic_WSI_Survival_Dataset(Dataset):
                 label_dict.update({(i, c):key_count})
                 key_count+=1
 
+        # 重新给定label值，就是上一段的编码值变成现在的label值
         self.label_dict = label_dict
         for i in slide_data.index:
             key = slide_data.loc[i, 'label']
@@ -102,23 +120,29 @@ class Generic_WSI_Survival_Dataset(Dataset):
             key = (key, int(censorship))
             slide_data.at[i, 'label'] = label_dict[key]
 
+        # 将标签分割点、分类类别数、病人数据等信息进行了处理和准备
         self.bins = q_bins
         self.num_classes=len(self.label_dict)
+        # 删除重复的病人信息
         patients_df = slide_data.drop_duplicates(['case_id'])
         self.patient_data = {'case_id':patients_df['case_id'].values, 'label':patients_df['label'].values}
 
         #new_cols = list(slide_data.columns[-2:]) + list(slide_data.columns[:-2]) ### ICCV
+        # 对幻灯片数据集的列进行了重新排序，把原来的分组标签 disc_label 放到了第一列
         new_cols = list(slide_data.columns[-1:]) + list(slide_data.columns[:-1])  ### PORPOISE
         slide_data = slide_data[new_cols]
         self.slide_data = slide_data
-        metadata = ['disc_label', 'Unnamed: 0', 'case_id', 'label', 'slide_id', 'age', 'site', 'survival_months', 'censorship', 'is_female', 'oncotree_code', 'train']
-        self.metadata = slide_data.columns[:12]
-        
+        metadata = ['disc_label', 'case_id', 'slide_id', 'label', 'site', 'is_female', 'oncotree_code', 'age', 'survival_months', 'censorship', 'train']
+        # metadata = ['disc_label', 'Unnamed: 0', 'case_id', 'label', 'slide_id', 'age', 'site', 'survival_months', 'censorship', 'is_female', 'oncotree_code', 'train']
+        self.metadata = slide_data.columns[:11]
+
+        # 查找并输出那些不包含指定字符串的基因名
         for col in slide_data.drop(self.metadata, axis=1).columns:
             if not pd.Series(col).str.contains('|_cnv|_rnaseq|_rna|_mut')[0]:
                 print(col)
         #pdb.set_trace()
 
+        # 进行元数据的断言检查
         assert self.metadata.equals(pd.Index(metadata))
         self.mode = mode
         self.cls_ids_prep()
@@ -127,10 +151,11 @@ class Generic_WSI_Survival_Dataset(Dataset):
         # For BLCA, TPTEP1_rnaseq was accidentally appended to the metadata
         #pdb.set_trace()
 
+        # print_info 参数为 True，打印输出信息
         if print_info:
             self.summarize()
 
-        ### Signatures
+        #  根据需要，选择是否使用基因组特征签名
         self.apply_sig = apply_sig
         if self.apply_sig:
             self.signatures = pd.read_csv('./datasets_csv_sig/signatures.csv')
@@ -145,10 +170,12 @@ class Generic_WSI_Survival_Dataset(Dataset):
         r"""
 
         """
+        # 创建了个大列表里面包含每个组对应患者的索引，patient_data只包含患者和对应的索引，slide_data是整个数据
         self.patient_cls_ids = [[] for i in range(self.num_classes)]        
         for i in range(self.num_classes):
             self.patient_cls_ids[i] = np.where(self.patient_data['label'] == i)[0]
 
+        #
         self.slide_cls_ids = [[] for i in range(self.num_classes)]
         for i in range(self.num_classes):
             self.slide_cls_ids[i] = np.where(self.slide_data['label'] == i)[0]
@@ -158,15 +185,18 @@ class Generic_WSI_Survival_Dataset(Dataset):
         r"""
         
         """
+        # 获取唯一的患者标识（case_id）
         patients = np.unique(np.array(self.slide_data['case_id'])) # get unique patients
         patient_labels = []
-        
+
+        # 为每个患者找到与其关联的所有幻灯片的位置（索引），"patient_labels" 列表将包含所有患者的标签
         for p in patients:
             locations = self.slide_data[self.slide_data['case_id'] == p].index.tolist()
             assert len(locations) > 0
             label = self.slide_data['label'][locations[0]] # get patient label
             patient_labels.append(label)
-        
+
+        # "patient_data" 字典就将每个患者的标识与其对应的标签关联起来
         self.patient_data = {'case_id':patients, 'label':np.array(patient_labels)}
 
 
@@ -175,7 +205,7 @@ class Generic_WSI_Survival_Dataset(Dataset):
         r"""
         
         """
-
+        # 从数据中移除不需要的标签，并对剩余的数据进行分箱处理。最终返回处理后的数据和分箱信息
         mask = data[label_col].isin(ignore)
         data = data[~mask]
         data.reset_index(drop=True, inplace=True)
@@ -183,11 +213,13 @@ class Generic_WSI_Survival_Dataset(Dataset):
         return data, bins
 
     def __len__(self):
+        # 在训练和验证循环中确定迭代的次数。如果采用患者层次的策略，每个患者被视为一个数据点；如果采用切片层次的策略，每个切片被视为一个数据点
         if self.patient_strat:
             return len(self.patient_data['case_id'])
         else:
             return len(self.slide_data)
 
+    # 打印一些关键信息
     def summarize(self):
         print("label column: {}".format(self.label_col))
         print("label dictionary: {}".format(self.label_dict))
@@ -247,11 +279,14 @@ class Generic_WSI_Survival_Dataset(Dataset):
 
 class Generic_MIL_Survival_Dataset(Generic_WSI_Survival_Dataset):
     def __init__(self, data_dir, mode: str='omic', **kwargs):
+        # 这是调用父类 Generic_WSI_Survival_Dataset 的构造函数的方式。它使用 super() 函数来调用父类的构造函数，从而初始化继承自父类的属性和方法。
+        # 通过 **kwargs，可以将所有关键字参数传递给父类的构造函数，以确保父类的属性正确初始化。
         super(Generic_MIL_Survival_Dataset, self).__init__(**kwargs)
         self.data_dir = data_dir
         self.mode = mode
         self.use_h5 = False
 
+    # 控制是否从 HDF5 数据格式加载数据
     def load_from_h5(self, toggle):
         self.use_h5 = toggle
 

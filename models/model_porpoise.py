@@ -170,16 +170,14 @@ args:
     dropout: whether to use dropout (p = 0.25)
     n_classes: number of classes (experimental usage for multiclass MIL)
 """
+# 定义了三个全连接的注意力层，第一个是tanh激活，第二个是sigmoid激活，前俩个层的输出进行哈达玛积，将结果输入第三层中，return 最终输出和X
 class Attn_Net_Gated(nn.Module):
 
     def __init__(self, L = 1024, D = 256, dropout = False, n_classes = 1):
         super(Attn_Net_Gated, self).__init__()
-        self.attention_a = [
-            nn.Linear(L, D),
-            nn.Tanh()]
+        self.attention_a = [nn.Linear(L, D),nn.Tanh()]
         
-        self.attention_b = [nn.Linear(L, D),
-                            nn.Sigmoid()]
+        self.attention_b = [nn.Linear(L, D),nn.Sigmoid()]
         if dropout:
             self.attention_a.append(nn.Dropout(0.25))
             self.attention_b.append(nn.Dropout(0.25))
@@ -192,6 +190,8 @@ class Attn_Net_Gated(nn.Module):
     def forward(self, x):
         a = self.attention_a(x)
         b = self.attention_b(x)
+        # a和b的相乘实际上是在合并两部分的注意力信息。a部分强调哪些特征是重要的，而b部分确定了每个特征的重要性程度。通过相乘操作，得到的A
+        # 包含了综合考虑两个部分的注意力信息，同时强调了哪些特征在整体上是重要的。
         A = a.mul(b)
         A = self.attention_c(A)  # N x n_classes
         return A, x
@@ -246,7 +246,7 @@ class PorpoiseAMIL(nn.Module):
     def forward(self, **kwargs):
         h = kwargs['x_path']
 
-        A, h = self.attention_net(h)  
+        A, h = self.attention_net(h)
         A = torch.transpose(A, 1, 0)
 
         if 'attention_only' in kwargs.keys():
@@ -254,8 +254,9 @@ class PorpoiseAMIL(nn.Module):
                 return A
 
         A_raw = A 
-        A = F.softmax(A, dim=1) 
-        M = torch.mm(A, h) 
+        A = F.softmax(A, dim=1)
+        # A是权重矩阵，它是[1,a]，a是病理图像分割了a个块，h是病理图像的特征[a,512],可以理解为h有512个特征，然后对每个特征进行加权（A就是权重矩阵）
+        M = torch.mm(A, h)
         h  = self.classifier(M)
         return h
 
@@ -274,13 +275,12 @@ class PorpoiseAMIL(nn.Module):
         M = torch.mm(A, h) 
         return M
 
-
 ### MMF (in the PORPOISE Paper)
 class PorpoiseMMF(nn.Module):
     def __init__(self, 
         omic_input_dim,
         path_input_dim=1024, 
-        fusion='bilinear', 
+        fusion='bilinear',
         dropout=0.25,
         n_classes=4, 
         scale_dim1=8, 

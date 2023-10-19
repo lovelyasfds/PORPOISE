@@ -8,7 +8,7 @@ sudo apt-get install openslide-tools
 
 Next, use the environment configuration file located in **docs/clam.yaml** to create a conda environment:
 ```shell
-conda env create -n clam -f docs/clam.yaml
+conda env create -n clam -f clam.yaml
 ```
 
 Activate the environment:

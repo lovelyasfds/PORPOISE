@@ -13,7 +13,8 @@ from datasets.dataset_generic import save_splits
 from models.model_genomic import SNN
 from models.model_set_mil import MIL_Sum_FC_surv, MIL_Attention_FC_surv, MIL_Cluster_FC_surv
 from models.model_coattn import MCAT_Surv
-from models.model_porpoise import PorpoiseMMF, PorpoiseAMIL, PorpoiseMMF_Fast
+# from models.model_porpoise import PorpoiseMMF, PorpoiseAMIL, PorpoiseMMF_Fast
+from models.model_porpoise import PorpoiseMMF, PorpoiseAMIL
 from utils.utils import *
 from utils.loss_func import NLLSurvLoss
 

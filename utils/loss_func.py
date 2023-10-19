@@ -66,9 +66,11 @@ def nll_loss(h, y, c, alpha=0.0, eps=1e-7, reduction='mean'):
 
     # make sure these are ints
     y = y.type(torch.int64)
+    # y = y-1
     c = c.type(torch.int64)
 
     hazards = torch.sigmoid(h)
+
     # print("hazards shape", hazards.shape)
 
     S = torch.cumprod(1 - hazards, dim=1)
